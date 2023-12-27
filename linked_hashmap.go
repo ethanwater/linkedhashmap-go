@@ -2,6 +2,7 @@ package main
 
 import (
 	"reflect"
+	"fmt"
 	"unsafe"
 	"strconv"
 	"errors"
@@ -104,6 +105,7 @@ func (lhm *LinkedHashMap[K, V]) Remove(key K) error {
 		if reflect.DeepEqual(bucket[i].key, key) {
 			bucket[i] = bucket[len(bucket)-1]
       lhm.buckets[bucketIndex] = bucket[:len(bucket)-1]
+			return nil
 		}
 	}
 	return errors.New("invalid key, no associated buckets found")
@@ -113,10 +115,54 @@ func (lhm *LinkedHashMap[K, V]) Bucket(key K) (uint64, error) {
 	if lhm.items == 0 {
 		return 0, errors.New("bucket is empty")
 	}
-	index := Hasher(bytify(key)) % uint64(len(lhm.buckets))
-	return index, nil
+
+
+	bucket := Hasher(bytify(key)) % uint64(len(lhm.buckets))
+
+	if bucket >= uint64(len(lhm.buckets)) {
+		return 0, errors.New("bucket does not exist")
+	}
+	return bucket, nil
 }
 
+type Server[K comparable, V any] struct {
+	table *LinkedHashMap[K, V] 
+}
+
+//naive implementation of the distribut algorithm
+//not recommended to rely on distributed tables due to the shuffle problem
+func (lhm *LinkedHashMap[K, V]) distributeMap(servers []Server[K, V]) error{
+	//variable used for error checking, if server doesn't exist
+	//not the robust method, just used as an example
+	var emptyServer Server[K, V] 
+
+
+	if len(servers) == 0 {
+		return errors.New("no servers available for distribution")
+	}
+	firstLayerBuckets := lhm.buckets
+
+	for _, bucket := range firstLayerBuckets {
+		for _, kv := range bucket {
+      hash := Hasher(bytify(kv.key)) % uint64(len(servers))
+			//if hash = number of servers, it's considered out of bounds
+			if hash >= uint64(len(servers)) {
+				return errors.New("hash overflows the amount of designated servers")
+			}
+			focusedServer := servers[hash]
+
+			if focusedServer == emptyServer {
+				return fmt.Errorf("server at index %d is nil", hash)
+			}
+
+			focusedServer.table.Insert(kv.key, kv.value)
+		}
+	}
+
+	return nil
+}
+
+//doesn't cover all types*
 func bytify[T any] (data T) []byte {
 	value := reflect.ValueOf(data)
 
